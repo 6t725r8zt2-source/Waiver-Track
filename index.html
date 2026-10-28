@@ -86,8 +86,9 @@
       <p><b>Attribution.</b> Every completed waiver claim or free-agent add starts a "stint" for that player on that team, which ends when the team drops or trades him. Any week he's in that team's <i>starting lineup</i> during the stint, his points get credited to that pickup. If you trade for a guy someone else picked up, you get no waiver credit. The original team stops getting credit once he's gone.</p>
       <p><b>PAR (Points Above Replacement).</b> Raw pickup points reward managers whose drafts went badly and who had to start pickups. PAR compares each start to a replacement-level starter at that position, that week, across the whole league (default: the 20th-percentile starter score). A pickup that scored 14 when replacement-level was 8 earns +6. Starting a waiver guy who did worse than replacement counts against you. So PAR measures finding <i>and</i> trusting the right guys.</p>
       <ul>
-        <li><b>Skill Score</b> = total PAR + an efficiency bonus. The bonus is 2.5 × <b>Eff.</b>, capped at ±25 so it nudges rankings rather than deciding them.</li>
-        <li><b>Eff.</b> = PAR per 10% of the FAAB budget spent. Anything under 10% counts as 10%, so a lucky $0 pickup can't produce an infinite score.</li>
+        <li><b>Going rate</b> = total PAR from every paid claim in the league ÷ total FAAB dollars bid. It's what an average FAAB dollar bought this season (shown at the top).</li>
+        <li><b>Value</b> = PAR − (going rate × FAAB spent). How much more, or less, a manager got than their spending should have bought. Spending big for nothing is heavily negative; free pickups that hit are pure profit.</li>
+        <li><b>Skill Score</b> = PAR + Value. It rewards both finding production and getting it cheaply, with no caps.</li>
         <li><b>Hit rate</b> = share of pickups that produced at least one start above replacement.</li>
         <li><b>$/PAR</b> = FAAB dollars spent per point above replacement (paid claims only). Lower is better.</li>
         <li><b>Lineup share</b> = % of the team's total starter points that came from pickups.</li>
@@ -236,20 +237,24 @@ function buildModel(S, opts){
 
   // 4) aggregate per team
   for(const a of acqs) if(teams[a.rid]) teams[a.rid].picks.push(a);
+  // League going rate: PAR returned per FAAB dollar across all paid claims (never below 0)
+  const paidAll = acqs.filter(a=>a.bid>0);
+  const $all = paidAll.reduce((s,a)=>s+a.bid,0);
+  const rate = $all>0 ? Math.max(0, paidAll.reduce((s,a)=>s+a.par,0)/$all) : 0;
+  for(const a of acqs) a.value = a.par - rate*a.bid;
   const rows = Object.values(teams).map(t=>{
     const P=t.picks, spent=P.reduce((s,a)=>s+a.bid,0), paid=P.filter(a=>a.bid>0);
     const par=P.reduce((s,a)=>s+a.par,0), sPts=P.reduce((s,a)=>s+a.starterPts,0), bPts=P.reduce((s,a)=>s+a.benchPts,0);
     const hits=P.filter(a=>a.weekLog.some(x=>x.started && x.pts>x.repl)).length;
     const paidPar=paid.reduce((s,a)=>s+a.par,0), paidSpent=paid.reduce((s,a)=>s+a.bid,0);
     const pctSpent = 100*spent/budget;
-    const eff = par / Math.max(pctSpent/10, 1);             // PAR per 10% of budget (floor of 10%)
-    const effBonus = Math.max(-25, Math.min(25, 2.5*eff));  // capped
+    const value = par - rate*spent;   // PAR beyond what the spend should have bought
     return {rid:t.rid, name:t.name, manager:t.manager, adds:P.length, waivers:P.filter(a=>a.kind==="waiver").length,
       fas:P.filter(a=>a.kind==="fa").length, spent, pctSpent, starts:P.reduce((s,a)=>s+a.starts,0),
       sPts, bPts, par, hitRate: P.length? hits/P.length : 0, costPerPar: paidPar>0? paidSpent/paidPar : null,
-      share: t.starterPtsTotal? sPts/t.starterPtsTotal : 0, eff, score: par+effBonus};
+      share: t.starterPtsTotal? sPts/t.starterPtsTotal : 0, value, score: par+value};
   });
-  return {rows, acqs, budget, weeksUsed, teams};
+  return {rows, acqs, budget, weeksUsed, teams, rate};
 }
 
 // ---------- rendering ----------
@@ -261,19 +266,19 @@ function compute(){
   const opts={playoffs:$("#playoffs").checked, replPct:+$("#replPct").value};
   const M=buildModel(state,opts); state.M=M;
   const wk=M.weeksUsed; const live = state.sameSeason && wk.includes(state.currentWeek);
-  setStatus(`${state.league.name} · ${state.league.season} · weeks ${wk[0]||"–"}–${wk[wk.length-1]||"–"}${live?" (current week in progress)":""} · $${M.budget} FAAB budget`);
+  setStatus(`${state.league.name} · ${state.league.season} · weeks ${wk[0]||"–"}–${wk[wk.length-1]||"–"}${live?" (current week in progress)":""} · $${M.budget} FAAB budget · going rate ${M.rate.toFixed(2)} PAR per $1`);
   $("#out").classList.remove("hidden");
 
   const best=[...M.acqs].sort((a,b)=>b.par-a.par)[0];
   const priciest=[...M.acqs].sort((a,b)=>b.bid-a.bid)[0];
-  const worst=[...M.acqs].filter(a=>a.bid>0).sort((a,b)=>(a.par/a.bid)-(b.par/b.bid))[0];
+  const worst=[...M.acqs].filter(a=>a.bid>0).sort((a,b)=>a.value-b.value)[0];
   const top=[...M.rows].sort((a,b)=>b.score-a.score)[0];
   const tn=rid=>M.teams[rid]?.name||rid;
   $("#cards").innerHTML=[
     ["Top waiver manager", top? `${top.name} <span class="sub">(${fmt(top.score)})</span>`:"–"],
     ["Best pickup", best? `${best.name} <span class="sub">${sgn(best.par)} PAR · ${tn(best.rid)}</span>`:"–"],
     ["Biggest FAAB bid", priciest&&priciest.bid? `$${priciest.bid} ${priciest.name} <span class="sub">${sgn(priciest.par)} PAR</span>`:"–"],
-    ["Worst value bid", worst? `$${worst.bid} ${worst.name} <span class="sub">${sgn(worst.par)} PAR</span>`:"–"],
+    ["Worst value bid", worst? `$${worst.bid} ${worst.name} <span class="sub">${sgn(worst.value)} value</span>`:"–"],
   ].map(([k,v])=>`<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
 
   const sel=$("#mgrFilter"), cur=sel.value;
@@ -292,7 +297,7 @@ const boardCols=[
   ["adds","Adds",r=>`${r.adds} <span class="sub">(${r.waivers}W/${r.fas}FA)</span>`],
   ["spent","FAAB spent",r=>`$${r.spent} <span class="sub">${fmt(r.pctSpent,0)}%</span>`],
   ["costPerPar","$/PAR",r=>r.costPerPar==null?"–":"$"+fmt(r.costPerPar,2)],
-  ["eff","Eff.",r=>fmt(r.eff)],
+  ["value","Value",r=>sgn(r.value)],
   ["hitRate","Hit rate",r=>fmt(100*r.hitRate,0)+"%"],
   ["share","Lineup share",r=>fmt(100*r.share,0)+"%"],
   ["bPts","Bench pts",r=>fmt(r.bPts)],
@@ -306,6 +311,7 @@ const pickCols=[
   ["starts","Starts",a=>a.starts],
   ["starterPts","Starter pts",a=>fmt(a.starterPts)],
   ["par","PAR",a=>sgn(a.par)],
+  ["value","Value",a=>sgn(a.value)],
   ["benchPts","Bench pts",a=>fmt(a.benchPts)],
   ["held","Held",a=>a.end===Infinity?`<span class="sub">still rostered</span>`:`thru wk ${a.end}`],
 ];
