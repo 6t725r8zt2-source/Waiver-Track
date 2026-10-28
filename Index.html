@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waiver Wire Skill Tracker</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Waivers">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f1216">
+<style>
+  :root{--bg:#0f1216;--panel:#171b21;--line:#262c35;--text:#e8ebef;--mute:#8b95a3;--acc:#3ddc97;--warn:#f5b84a;--bad:#ef6a6a}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{padding:20px 20px 8px;max-width:1200px;margin:auto}
+  h1{font-size:20px;margin:0 0 4px}
+  h2{font-size:16px;margin:28px 0 10px}
+  .sub{color:var(--mute)}
+  main{padding:0 20px 40px;max-width:1200px;margin:auto}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:14px 0}
+  input[type=text]{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:6px;width:230px;font:inherit}
+  button{background:var(--acc);color:#06281a;border:0;padding:8px 14px;border-radius:6px;font-weight:600;cursor:pointer;font:inherit;font-weight:600}
+  button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+  label{color:var(--mute);display:flex;gap:6px;align-items:center}
+  #status{color:var(--mute);min-height:20px}
+  #status.err{color:var(--bad)}
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+  table{border-collapse:collapse;width:100%;white-space:nowrap}
+  th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line)}
+  th:first-child,td:first-child,th.l,td.l{text-align:left}
+  th{background:var(--panel);color:var(--mute);font-weight:600;cursor:pointer;user-select:none;position:sticky;top:0}
+  th.sorted::after{content:" ▾"} th.sorted.asc::after{content:" ▴"}
+  tbody tr:hover{background:#1b2028}
+  tr.clickable{cursor:pointer}
+  .pos{color:var(--acc)} .neg{color:var(--bad)}
+  .score{font-weight:700}
+  .pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:12px;background:#222833;color:var(--mute)}
+  .pill.w{background:#183528;color:var(--acc)} .pill.f{background:#2d2a1b;color:var(--warn)}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px}
+  .card .k{color:var(--mute);font-size:12px} .card .v{font-size:18px;font-weight:700;margin-top:2px}
+  details{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-top:14px}
+  summary{cursor:pointer;font-weight:600}
+  details p,details li{color:#c3cad3}
+  .hidden{display:none}
+  select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px;font:inherit}
+</style>
+</head>
+<body>
+<header>
+  <h1>Waiver Wire Skill Tracker</h1>
+  <div class="sub">Sleeper leagues · FAAB spent vs. points your pickups actually scored in your lineup</div>
+</header>
+<main>
+  <div class="controls">
+    <input id="leagueId" type="text" value="1389738819783237632" aria-label="Sleeper league ID">
+    <button id="go">Load league</button>
+    <label><input type="checkbox" id="playoffs"> Include playoff weeks</label>
+    <label>Replacement level
+      <select id="replPct">
+        <option value="0.2" selected>20th pct starter</option>
+        <option value="0.33">33rd pct starter</option>
+        <option value="0.5">Median starter</option>
+      </select>
+    </label>
+  </div>
+  <div id="status">Enter a Sleeper league ID and load.</div>
+
+  <section id="out" class="hidden">
+    <div class="cards" id="cards"></div>
+
+    <h2>Manager leaderboard</h2>
+    <div class="sub" style="margin-bottom:8px">Tap a column to sort · tap a manager to filter pickups below</div>
+    <div class="tablewrap"><table id="board"></table></div>
+
+    <h2 id="pickTitle">Every pickup</h2>
+    <div class="controls" style="margin-top:0">
+      <select id="mgrFilter"><option value="">All managers</option></select>
+      <label><input type="checkbox" id="onlyStarted"> Only pickups that started</label>
+    </div>
+    <div class="tablewrap"><table id="picks"></table></div>
+
+    <details>
+      <summary>How the Waiver Skill metric works</summary>
+      <p><b>Attribution.</b> Every completed waiver claim or free-agent add starts a "stint" for that player on that team, which ends when the team drops or trades him. Any week he's in that team's <i>starting lineup</i> during the stint, his points get credited to that pickup. If you trade for a guy someone else picked up, you get no waiver credit. The original team stops getting credit once he's gone.</p>
+      <p><b>PAR (Points Above Replacement).</b> Raw pickup points reward managers whose drafts went badly and who had to start pickups. PAR compares each start to a replacement-level starter at that position, that week, across the whole league (default: the 20th-percentile starter score). A pickup that scored 14 when replacement-level was 8 earns +6. Starting a waiver guy who did worse than replacement counts against you. So PAR measures finding <i>and</i> trusting the right guys.</p>
+      <ul>
+        <li><b>Skill Score</b> = total PAR + an efficiency bonus. The bonus is 2.5 × <b>Eff.</b>, capped at ±25 so it nudges rankings rather than deciding them.</li>
+        <li><b>Eff.</b> = PAR per 10% of the FAAB budget spent. Anything under 10% counts as 10%, so a lucky $0 pickup can't produce an infinite score.</li>
+        <li><b>Hit rate</b> = share of pickups that produced at least one start above replacement.</li>
+        <li><b>$/PAR</b> = FAAB dollars spent per point above replacement (paid claims only). Lower is better.</li>
+        <li><b>Lineup share</b> = % of the team's total starter points that came from pickups.</li>
+      </ul>
+      <p><b>Caveats.</b> A pickup who boomed on your bench gets no credit (the "Bench pts" column shows what you left there). Transactions are matched to weeks using Sleeper's week ("leg") field. Weeks still in progress use live partial scores.</p>
+    </details>
+  </section>
+</main>
+
+<script>
+const API = "https://api.sleeper.app/v1";
+const $ = s => document.querySelector(s);
+const state = {};
+
+function setStatus(msg, err){ const el=$("#status"); el.textContent=msg; el.className=err?"err":""; }
+async function getJSON(path){
+  const r = await fetch(API+path);
+  if(!r.ok) throw new Error(`${r.status} on ${path}`);
+  return r.json();
+}
+
+async function loadPlayers(){
+  const KEY="sleeperPlayersSlim", TS="sleeperPlayersTs";
+  try{
+    const ts=+localStorage.getItem(TS);
+    if(ts && Date.now()-ts < 24*3600e3){ const c=localStorage.getItem(KEY); if(c) return JSON.parse(c); }
+  }catch(e){}
+  setStatus("Downloading NFL player list (about 5 MB, cached for a day)…");
+  const all = await getJSON("/players/nfl");
+  const slim={};
+  for(const [id,p] of Object.entries(all)){
+    slim[id]={n: p.full_name || ((p.first_name||"")+" "+(p.last_name||"")).trim() || id, p: p.position || (p.fantasy_positions||[])[0] || "?", t: p.team||""};
+  }
+  try{ localStorage.setItem(KEY, JSON.stringify(slim)); localStorage.setItem(TS, String(Date.now())); }catch(e){}
+  return slim;
+}
+
+function quantile(arr,q){
+  if(!arr.length) return 0;
+  const a=[...arr].sort((x,y)=>x-y), pos=(a.length-1)*q, lo=Math.floor(pos), hi=Math.ceil(pos);
+  return a[lo]+(a[hi]-a[lo])*(pos-lo);
+}
+
+async function load(){
+  const id=$("#leagueId").value.trim();
+  if(!/^\d+$/.test(id)){ setStatus("League ID should be all digits.", true); return; }
+  $("#go").disabled=true;
+  try{
+    setStatus("Loading league…");
+    const [league, users, rosters, nfl] = await Promise.all([
+      getJSON(`/league/${id}`), getJSON(`/league/${id}/users`), getJSON(`/league/${id}/rosters`), getJSON(`/state/nfl`)
+    ]);
+    if(!league) throw new Error("League not found");
+    const playoffStart = league.settings.playoff_week_start || 15;
+    let maxWeek = 18;
+    if(String(nfl.season)===String(league.season) && nfl.season_type==="regular") maxWeek = Math.max(1, nfl.week);
+    if(String(nfl.season)===String(league.season) && nfl.season_type==="pre") maxWeek = 1;
+
+    setStatus(`Loading ${maxWeek} weeks of transactions and lineups…`);
+    const weeks=[...Array(maxWeek)].map((_,i)=>i+1);
+    const [txWeeks, mWeeks, players] = await Promise.all([
+      Promise.all(weeks.map(w=>getJSON(`/league/${id}/transactions/${w}`).catch(()=>[]))),
+      Promise.all(weeks.map(w=>getJSON(`/league/${id}/matchups/${w}`).catch(()=>[]))),
+      loadPlayers()
+    ]);
+    Object.assign(state,{league,users,rosters,txWeeks,mWeeks,players,playoffStart,maxWeek,currentWeek:nfl.week,sameSeason:String(nfl.season)===String(league.season)});
+    compute();
+  }catch(e){
+    console.error(e);
+    setStatus("Couldn't load from Sleeper: "+e.message+". If you opened this file from a phone's file viewer, try it in a desktop browser.", true);
+  }finally{ $("#go").disabled=false; }
+}
+
+// ---------- core model ----------
+function buildModel(S, opts){
+  const {league,users,rosters,txWeeks,mWeeks,players,playoffStart} = S;
+  const budget = league.settings.waiver_budget || 100;
+  const userById = Object.fromEntries(users.map(u=>[u.user_id,u]));
+  const teams = {};
+  for(const r of rosters){
+    const u = userById[r.owner_id] || {};
+    teams[r.roster_id] = {rid:r.roster_id, name:(u.metadata&&u.metadata.team_name)||u.display_name||`Team ${r.roster_id}`, manager:u.display_name||"", picks:[], starterPtsTotal:0};
+  }
+  const pinfo = pid => players[pid] || {n: /^[A-Z]{2,3}$/.test(pid)? pid+" D/ST" : pid, p: /^[A-Z]{2,3}$/.test(pid)?"DEF":"?", t:""};
+
+  // 1) stints from transactions in chronological order
+  const txs = txWeeks.flat().filter(t=>t && t.status==="complete")
+    .sort((a,b)=>(a.leg-b.leg)||((a.status_updated||a.created)-(b.status_updated||b.created)));
+  const open = {};      // `${rid}|${pid}` -> stint
+  const stints = {};    // `${rid}|${pid}` -> [stints]
+  const acqs = [];
+  const close = (rid,pid,leg)=>{ const k=rid+"|"+pid; if(open[k]){ open[k].end=leg; delete open[k]; } };
+  for(const t of txs){
+    for(const [pid,rid] of Object.entries(t.drops||{})) close(rid,pid,t.leg);
+    for(const [pid,rid] of Object.entries(t.adds||{})){
+      const k=rid+"|"+pid;
+      if(open[k]) { open[k].end=t.leg; delete open[k]; }
+      const isW = t.type==="waiver", isF = t.type==="free_agent";
+      const st = {rid, pid, start:t.leg, end:Infinity, kind: isW?"waiver":isF?"fa":t.type, created:t.status_updated||t.created};
+      if(isW||isF){
+        const p=pinfo(pid);
+        Object.assign(st,{name:p.n,pos:p.p,nflTeam:p.t, bid: isW ? ((t.settings&&t.settings.waiver_bid)||0) : 0,
+          starts:0, starterPts:0, benchPts:0, par:0, rosteredWeeks:0, bestWeek:null, weekLog:[]});
+        acqs.push(st);
+      }
+      open[k]=st; (stints[k]=stints[k]||[]).push(st);
+    }
+  }
+  const findStint=(rid,pid,w)=>{
+    const list=stints[rid+"|"+pid]; if(!list) return null;
+    let best=null; for(const s of list) if(s.start<=w && w<=s.end) best=s; return best;
+  };
+
+  // 2) replacement level per position/week from all league starters
+  const weeksUsed=[];
+  mWeeks.forEach((ms,i)=>{ const w=i+1; if(!opts.playoffs && w>=playoffStart) return; if(ms&&ms.length) weeksUsed.push(w); });
+  const repl={};
+  for(const w of weeksUsed){
+    const byPos={};
+    for(const m of mWeeks[w-1]) (m.starters||[]).forEach((pid,j)=>{ if(!pid||pid==="0") return; const pos=pinfo(pid).p; (byPos[pos]=byPos[pos]||[]).push((m.starters_points||[])[j]||0); });
+    repl[w]={}; for(const [pos,arr] of Object.entries(byPos)) repl[w][pos]=quantile(arr,opts.replPct);
+  }
+
+  // 3) credit weekly points
+  for(const w of weeksUsed){
+    for(const m of mWeeks[w-1]){
+      const team=teams[m.roster_id]; if(!team) continue;
+      const starters=m.starters||[], sp=m.starters_points||[], pp=m.players_points||{};
+      const startSet=new Set(starters);
+      starters.forEach((pid,j)=>{ if(pid&&pid!=="0") team.starterPtsTotal += sp[j]||0; });
+      for(const pid of (m.players||[])){
+        const s=findStint(m.roster_id,pid,w);
+        if(!s || (s.kind!=="waiver"&&s.kind!=="fa")) continue;
+        s.rosteredWeeks++;
+        const pts = pp[pid]||0;
+        if(startSet.has(pid)){
+          const j=starters.indexOf(pid); const p=sp[j]!=null?sp[j]:pts;
+          const r=(repl[w]&&repl[w][s.pos])||0;
+          s.starts++; s.starterPts+=p; s.par+=p-r;
+          s.weekLog.push({w,pts:p,repl:r,started:true});
+          if(!s.bestWeek||p>s.bestWeek.pts) s.bestWeek={w,pts:p};
+        } else { s.benchPts+=pts; s.weekLog.push({w,pts,started:false}); }
+      }
+    }
+  }
+
+  // 4) aggregate per team
+  for(const a of acqs) if(teams[a.rid]) teams[a.rid].picks.push(a);
+  const rows = Object.values(teams).map(t=>{
+    const P=t.picks, spent=P.reduce((s,a)=>s+a.bid,0), paid=P.filter(a=>a.bid>0);
+    const par=P.reduce((s,a)=>s+a.par,0), sPts=P.reduce((s,a)=>s+a.starterPts,0), bPts=P.reduce((s,a)=>s+a.benchPts,0);
+    const hits=P.filter(a=>a.weekLog.some(x=>x.started && x.pts>x.repl)).length;
+    const paidPar=paid.reduce((s,a)=>s+a.par,0), paidSpent=paid.reduce((s,a)=>s+a.bid,0);
+    const pctSpent = 100*spent/budget;
+    const eff = par / Math.max(pctSpent/10, 1);             // PAR per 10% of budget (floor of 10%)
+    const effBonus = Math.max(-25, Math.min(25, 2.5*eff));  // capped
+    return {rid:t.rid, name:t.name, manager:t.manager, adds:P.length, waivers:P.filter(a=>a.kind==="waiver").length,
+      fas:P.filter(a=>a.kind==="fa").length, spent, pctSpent, starts:P.reduce((s,a)=>s+a.starts,0),
+      sPts, bPts, par, hitRate: P.length? hits/P.length : 0, costPerPar: paidPar>0? paidSpent/paidPar : null,
+      share: t.starterPtsTotal? sPts/t.starterPtsTotal : 0, eff, score: par+effBonus};
+  });
+  return {rows, acqs, budget, weeksUsed, teams};
+}
+
+// ---------- rendering ----------
+const fmt=(n,d=1)=> n==null||!isFinite(n) ? "–" : n.toFixed(d);
+const sgn=(n,d=1)=> n==null ? "–" : `<span class="${n>0?'pos':n<0?'neg':''}">${n>0?'+':''}${n.toFixed(d)}</span>`;
+let boardSort={k:"score",asc:false}, pickSort={k:"par",asc:false};
+
+function compute(){
+  const opts={playoffs:$("#playoffs").checked, replPct:+$("#replPct").value};
+  const M=buildModel(state,opts); state.M=M;
+  const wk=M.weeksUsed; const live = state.sameSeason && wk.includes(state.currentWeek);
+  setStatus(`${state.league.name} · ${state.league.season} · weeks ${wk[0]||"–"}–${wk[wk.length-1]||"–"}${live?" (current week in progress)":""} · $${M.budget} FAAB budget`);
+  $("#out").classList.remove("hidden");
+
+  const best=[...M.acqs].sort((a,b)=>b.par-a.par)[0];
+  const priciest=[...M.acqs].sort((a,b)=>b.bid-a.bid)[0];
+  const worst=[...M.acqs].filter(a=>a.bid>0).sort((a,b)=>(a.par/a.bid)-(b.par/b.bid))[0];
+  const top=[...M.rows].sort((a,b)=>b.score-a.score)[0];
+  const tn=rid=>M.teams[rid]?.name||rid;
+  $("#cards").innerHTML=[
+    ["Top waiver manager", top? `${top.name} <span class="sub">(${fmt(top.score)})</span>`:"–"],
+    ["Best pickup", best? `${best.name} <span class="sub">${sgn(best.par)} PAR · ${tn(best.rid)}</span>`:"–"],
+    ["Biggest FAAB bid", priciest&&priciest.bid? `$${priciest.bid} ${priciest.name} <span class="sub">${sgn(priciest.par)} PAR</span>`:"–"],
+    ["Worst value bid", worst? `$${worst.bid} ${worst.name} <span class="sub">${sgn(worst.par)} PAR</span>`:"–"],
+  ].map(([k,v])=>`<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+
+  const sel=$("#mgrFilter"), cur=sel.value;
+  sel.innerHTML=`<option value="">All managers</option>`+M.rows.map(r=>`<option value="${r.rid}">${esc(r.name)}</option>`).join("");
+  sel.value=cur;
+  renderBoard(); renderPicks();
+}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+const boardCols=[
+  ["name","Team",r=>`${esc(r.name)}${r.manager&&r.manager!==r.name?` <span class="sub">${esc(r.manager)}</span>`:""}`,"l"],
+  ["score","Skill Score",r=>`<span class="score">${fmt(r.score)}</span>`],
+  ["par","PAR",r=>sgn(r.par)],
+  ["sPts","Starter pts",r=>fmt(r.sPts)],
+  ["starts","Starts",r=>r.starts],
+  ["adds","Adds",r=>`${r.adds} <span class="sub">(${r.waivers}W/${r.fas}FA)</span>`],
+  ["spent","FAAB spent",r=>`$${r.spent} <span class="sub">${fmt(r.pctSpent,0)}%</span>`],
+  ["costPerPar","$/PAR",r=>r.costPerPar==null?"–":"$"+fmt(r.costPerPar,2)],
+  ["eff","Eff.",r=>fmt(r.eff)],
+  ["hitRate","Hit rate",r=>fmt(100*r.hitRate,0)+"%"],
+  ["share","Lineup share",r=>fmt(100*r.share,0)+"%"],
+  ["bPts","Bench pts",r=>fmt(r.bPts)],
+];
+const pickCols=[
+  ["name","Player",a=>`${esc(a.name)} <span class="sub">${a.pos} ${a.nflTeam}</span>`,"l"],
+  ["team","Team",a=>esc(state.M.teams[a.rid]?.name||a.rid),"l"],
+  ["start","Wk",a=>a.start],
+  ["kind","How",a=>a.kind==="waiver"?`<span class="pill w">Waiver</span>`:`<span class="pill f">FA</span>`],
+  ["bid","Bid",a=>a.kind==="waiver"?"$"+a.bid:"–"],
+  ["starts","Starts",a=>a.starts],
+  ["starterPts","Starter pts",a=>fmt(a.starterPts)],
+  ["par","PAR",a=>sgn(a.par)],
+  ["benchPts","Bench pts",a=>fmt(a.benchPts)],
+  ["held","Held",a=>a.end===Infinity?`<span class="sub">still rostered</span>`:`thru wk ${a.end}`],
+];
+function sortRows(rows,s,cols){
+  const get = (r)=> s.k==="team" ? (state.M.teams[r.rid]?.name||"") : s.k==="held" ? (r.end===Infinity?999:r.end) : r[s.k];
+  return [...rows].sort((a,b)=>{ let x=get(a),y=get(b); if(x==null) x=s.asc?Infinity:-Infinity; if(y==null) y=s.asc?Infinity:-Infinity;
+    if(typeof x==="string") return s.asc? x.localeCompare(y): y.localeCompare(x); return s.asc? x-y : y-x; });
+}
+function table(el,cols,rows,s,onSort,rowAttr){
+  el.innerHTML=`<thead><tr>${cols.map(([k,l,,c])=>`<th data-k="${k}" class="${c||''} ${s.k===k?'sorted'+(s.asc?' asc':''):''}">${l}</th>`).join("")}</tr></thead>
+  <tbody>${rows.map(r=>`<tr ${rowAttr?rowAttr(r):""}>${cols.map(([,, f,c])=>`<td class="${c||''}">${f(r)}</td>`).join("")}</tr>`).join("")||`<tr><td colspan="${cols.length}" class="sub">No pickups yet.</td></tr>`}</tbody>`;
+  el.querySelectorAll("th").forEach(th=>th.onclick=()=>{ const k=th.dataset.k; if(s.k===k) s.asc=!s.asc; else {s.k=k; s.asc=(k==="name"||k==="team"||k==="costPerPar");} onSort(); });
+}
+function renderBoard(){
+  const el=$("#board");
+  table(el,boardCols,sortRows(state.M.rows,boardSort),boardSort,renderBoard,r=>`class="clickable" data-rid="${r.rid}"`);
+  el.querySelectorAll("tbody tr[data-rid]").forEach(tr=>tr.onclick=()=>{ $("#mgrFilter").value=tr.dataset.rid; renderPicks(); $("#pickTitle").scrollIntoView({behavior:"smooth"}); });
+}
+function renderPicks(){
+  let rows=state.M.acqs; const f=$("#mgrFilter").value;
+  if(f) rows=rows.filter(a=>String(a.rid)===f);
+  if($("#onlyStarted").checked) rows=rows.filter(a=>a.starts>0);
+  $("#pickTitle").textContent = f? `Pickups: ${state.M.teams[f]?.name}` : "Every pickup";
+  table($("#picks"),pickCols,sortRows(rows,pickSort),pickSort,renderPicks);
+}
+
+$("#go").onclick=load;
+$("#leagueId").addEventListener("keydown",e=>{ if(e.key==="Enter") load(); });
+["#playoffs","#replPct"].forEach(s=>$(s).addEventListener("change",()=>state.M&&compute()));
+["#mgrFilter","#onlyStarted"].forEach(s=>$(s).addEventListener("change",()=>state.M&&renderPicks()));
+load();
+</script>
+</body>
+</html>
